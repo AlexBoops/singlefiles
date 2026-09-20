@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1.0">
+<title>Buckshot</title>
+<style>
+html, body, #canvas {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  width: 100%;
+  height: 100%;
+}
+
+body {
+  color: white;
+  background-color: black;
+  overflow: hidden;
+  touch-action: none;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+#canvas {
+  display: block;
+}
+
+#canvas:focus {
+  outline: none;
+}
+
+#status {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #0b0b0d;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  z-index: 999;
+}
+
+.spinner {
+  width: 48px;
+  height: 48px;
+  border: 4px solid #2d1820;
+  border-top: 4px solid #c93b58;
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+  margin-bottom: 20px;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+#status-progress {
+  width: 320px;
+  max-width: 80%;
+  height: 14px;
+  appearance: none;
+  border: none;
+  border-radius: 7px;
+  overflow: hidden;
+  background-color: #1e1e24;
+  margin-bottom: 15px;
+}
+
+#status-progress::-webkit-progress-bar {
+  background-color: #1e1e24;
+}
+
+#status-progress::-webkit-progress-value {
+  background: linear-gradient(90deg, #9b3943, #ff4c68);
+  transition: width 0.15s ease-out;
+}
+
+#status-progress::-moz-progress-bar {
+  background: linear-gradient(90deg, #9b3943, #ff4c68);
+}
+
+#status-notice {
+  font-size: 14px;
+  letter-spacing: 0.5px;
+  color: #d1d1d6;
+  text-align: center;
+  padding: 0 1rem;
+}
+</style>
+</head>
+<body>
+<canvas id="canvas">Your browser does not support the canvas tag.</canvas>
+
+<div id="status">
+  <div class="spinner" id="spinner"></div>
+  <progress id="status-progress" value="0" max="39"></progress>
+  <div id="status-notice">Initializing runtime storage...</div>
+</div>
+
+<script>
+const CDN_BASE = 'https://cdn.jsdelivr.net/gh/Stratus-Games/Buckshot-NEWEST-Port@V1.14/';
+const GITHACK_BASE = 'https://raw.githack.com/Stratus-Games/Buckshot-NEWEST-Port/V1.14/';
+const WASM_FILE = 'GlitchesBuckshot-W-MPsupport.wasm';
+const PCK_FILE = 'GlitchesBuckshot-W-MPsupport.pck';
+
+function openAssetDB() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open('GodotStreamingCacheDB', 1);
+    request.onupgradeneeded = (event) => {
+      const db = event.target.result;
+      if (!db.objectStoreNames.contains('chunks')) {
+        db.createObjectStore('chunks');
+      }
+    };
+    request.onsuccess = (event) => resolve(event.target.result);
+    request.onerror = (event) => reject(event.target.error);
+  });
+}
+
+function getChunk(db, key) {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('chunks', 'readonly');
+    const store = transaction.objectStore('chunks');
+    const request = store.get(key);
+    request.onsuccess = () => resolve(request.result || null);
+    request.onerror = (event) => reject(event.target.error);
+  });
+}
+
+function saveChunk(db, key, data) {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('chunks', 'readwrite');
+    const store = transaction.objectStore('chunks');
+    const request = store.put(data, key);
+    request.onsuccess = () => resolve();
+    request.onerror = (event) => reject(event.target.error);
+  });
+}
+
+function hasChunk(db, key) {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('chunks', 'readonly');
+    const store = transaction.objectStore('chunks');
+    const request = store.getKey(key);
+    request.onsuccess = () => resolve(request.result !== undefined);
+    request.onerror = (event) => reject(event.target.error);
+  });
+}
+
+async function downloadAndCacheAssets(db, progressBar, statusNotice) {
+  let chunksProcessed = 0;
+
+  for (let i = 1; i <= 2; i++) {
+    const key = `wasm_part_${i}`;
+    const exists = await hasChunk(db, key);
+    if (!exists) {
+      statusNotice.textContent = `Downloading Engine Core (${i}/2)...`;
+      const res = await fetch(`${GITHACK_BASE}${WASM_FILE}.part${i}`);
+      if (!res.ok) throw new Error(`Network failure on WASM part ${i}: Status ${res.status}`);
+      const buffer = await res.arrayBuffer();
+      await saveChunk(db, key, buffer);
+    }
+    chunksProcessed++;
+    progressBar.value = chunksProcessed;
+  }
+
+  for (let i = 1; i <= 37; i++) {
+    const pad = String(i).padStart(2, '0');
+    const key = `pck_part_${pad}`;
+    const exists = await hasChunk(db, key);
+    if (!exists) {
+      statusNotice.textContent = `Downloading Game Resources (${i}/37)...`;
+      const res = await fetch(`${GITHACK_BASE}${PCK_FILE}.part${pad}`);
+      if (!res.ok) throw new Error(`Network failure on package chunk ${pad}: Status ${res.status}`);
+      const buffer = await res.arrayBuffer();
+      await saveChunk(db, key, buffer);
+    }
+    chunksProcessed++;
+    progressBar.value = chunksProcessed;
+  }
+}
+
+function makeStreamingResponse(db, totalParts, prefix, contentType) {
+  let currentPart = 1;
+  const stream = new ReadableStream({
+    async pull(controller) {
+      if (currentPart > totalParts) {
+        controller.close();
+        return;
+      }
+      try {
+        const suffix = prefix === 'pck_part_' ? String(currentPart).padStart(2, '0') : currentPart;
+        const key = `${prefix}${suffix}`;
+        const buffer = await getChunk(db, key);
+        if (!buffer) {
+          throw new Error(`Corrupted storage index: Missing chunk ${key}`);
+        }
+        controller.enqueue(new Uint8Array(buffer));
+        currentPart++;
+      } catch (err) {
+        controller.error(err);
+      }
+    }
+  });
+
+  return new Response(stream, {
+    status: 200,
+    statusText: 'OK',
+    headers: { 'Content-Type': contentType }
+  });
+}
+
+function setupStreamingFetchInterceptor(db) {
+  const originalFetch = window.fetch;
+  window.fetch = async function (input, init) {
+    const url = typeof input === 'string' ? input : (input instanceof Request ? input.url : '');
+    if (url.includes(WASM_FILE)) {
+      return makeStreamingResponse(db, 2, 'wasm_part_', 'application/wasm');
+    }
+    if (url.includes(PCK_FILE)) {
+      return makeStreamingResponse(db, 37, 'pck_part_', 'application/octet-stream');
+    }
+    return originalFetch(input, init);
+  };
+}
+
+function injectEngineRuntimeScript(url) {
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = url;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error(`Failed to load engine runtime: ${url}`));
+    document.body.appendChild(script);
+  });
+}
+
+window.addEventListener('DOMContentLoaded', async () => {
+  const progressBar = document.getElementById('status-progress');
+  const statusNotice = document.getElementById('status-notice');
+
+  try {
+    const db = await openAssetDB();
+    await downloadAndCacheAssets(db, progressBar, statusNotice);
+
+    statusNotice.textContent = 'Assembling resources & launching engine...';
+    setupStreamingFetchInterceptor(db);
+
+    await injectEngineRuntimeScript(`${CDN_BASE}GlitchesBuckshot-W-MPsupport.js`);
+    launchGodotEngine();
+  } catch (err) {
+    statusNotice.textContent = `Error: ${err.message}`;
+    const spinner = document.getElementById('spinner');
+    if (spinner) spinner.style.display = 'none';
+  }
+});
+
+function launchGodotEngine() {
+  const GODOT_CONFIG = {
+    args: [],
+    canvasResizePolicy: 2,
+    emscriptenPoolSize: 8,
+    ensureCrossOriginIsolationHeaders: false,
+    executable: `${CDN_BASE}GlitchesBuckshot-W-MPsupport`,
+    focusCanvas: true,
+    godotPoolSize: 4
+  };
+
+  const engine = new Engine(GODOT_CONFIG);
+  const statusOverlay = document.getElementById('status');
+  const progressBar = document.getElementById('status-progress');
+
+  progressBar.removeAttribute('value');
+  progressBar.removeAttribute('max');
+
+  engine.startGame({
+    onProgress: (current, total) => {
+      if (total > 0) {
+        progressBar.max = total;
+        progressBar.value = current;
+      }
+    }
+  }).then(() => {
+    statusOverlay.remove();
+  }).catch((err) => {
+    const statusNotice = document.getElementById('status-notice');
+    statusNotice.textContent = `Launch failure: ${err.message || err}`;
+  });
+}
+</script>
+</body>
+</html>
