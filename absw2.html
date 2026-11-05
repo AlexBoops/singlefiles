@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>ABSW2</title>
+<base href="https://cdn.jsdelivr.net/gh/nawsif/absw2@main/">
+
+<style>
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#000;color:#fff;font:16px system-ui}
+#game{position:fixed;inset:0;display:grid;place-items:center;background:#000}
+#canvas{display:block;width:min(100vw,177.777778vh);height:min(100vh,56.25vw);outline:0;touch-action:none}
+#status{position:fixed;inset:0;z-index:2;display:grid;place-items:center;background:#101318;text-align:center;padding:24px}
+#status[hidden],#spinner{display:none}
+
+.rb-controls {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  display: flex;
+  gap: 8px;
+  z-index: 999999;
+}
+.rb-button {
+  background: rgba(0, 0, 0, 0.65);
+  color: #ddd;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  box-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  user-select: none;
+  backdrop-filter: blur(4px);
+  transition: background 0.2s, color 0.2s;
+}
+.rb-button:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+}
+.rb-button:active {
+  transform: translateY(1px);
+}
+</style>
+
+<script>
+// CDN endpoints for nawsif/absw2
+const JSDELIVR_BASE = "https://cdn.jsdelivr.net/gh/nawsif/absw2@main/";
+const GITHACK_BASE = "https://raw.githack.com/nawsif/absw2/main/";
+
+function fixUrl(url) {
+  if (!url || typeof url !== "string") return url;
+  if (url.startsWith("data:") || url.startsWith("blob:")) return url;
+
+  let clean = url
+    .replace("https://cdn.jsdelivr.net/gh/nawsif/absw2@main/", "")
+    .replace("https://raw.githack.com/nawsif/absw2/main/", "")
+    .replace(/^\/+/, "");
+
+  // Route heavy binary packages (game.love / .wasm / .data) through raw.githack to prevent jsDelivr size cutoffs
+  if (clean.includes("game.love") || clean.endsWith(".wasm") || clean.endsWith(".data")) {
+    return GITHACK_BASE + clean;
+  }
+  return JSDELIVR_BASE + clean;
+}
+
+// Intercept XMLHttpRequest for CDN routing
+const origOpen = XMLHttpRequest.prototype.open;
+XMLHttpRequest.prototype.open = function(method, url, ...rest) {
+  return origOpen.call(this, method, fixUrl(url), ...rest);
+};
+
+// Intercept fetch API for CDN routing
+const origFetch = window.fetch;
+window.fetch = function(input, init) {
+  let url = typeof input === "string" ? input : (input && input.url ? input.url : "");
+  return origFetch(typeof input === "string" ? fixUrl(url) : new Request(fixUrl(url), input), init);
+};
+
+// AudioContext unlocker for browsers requiring user interaction
+function unlockAudio() {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (AC) {
+    const dummy = new AC();
+    if (dummy.state === "suspended") dummy.resume();
+  }
+}
+window.addEventListener("click", unlockAudio, { once: true });
+window.addEventListener("keydown", unlockAudio, { once: true });
+window.addEventListener("touchstart", unlockAudio, { once: true });
+</script>
+</head>
+
+<body>
+<div class="rb-controls">
+  <button class="rb-button" id="btn-ab" title="Open in About:Blank">🌐 About:Blank</button>
+  <button class="rb-button" id="btn-fs" title="Toggle Fullscreen">⛶ Fullscreen</button>
+</div>
+
+<div id="game">
+  <canvas id="canvas" width="1280" height="720" tabindex="0" aria-label="Angry Birds Star Wars II"></canvas>
+  <div id="status" role="status">Loading game…</div>
+</div>
+
+<script>
+// About:Blank Cloaker with Google Docs disguise
+const abBtn = document.getElementById("btn-ab");
+if (window.location.href === "about:blank" || window.origin === "null") {
+  abBtn.style.display = "none";
+}
+abBtn.addEventListener("click", function() {
+  try {
+    const win = window.open("about:blank", "_blank");
+    if (!win || win.closed) {
+      alert("Pop-up blocked! Allow pop-ups to open about:blank.");
+      return;
+    }
+    win.document.title = "Google Docs";
+    const link = win.document.createElement("link");
+    link.rel = "icon";
+    link.href = "https://ssl.gstatic.com/docs/documents/images/kix-favicon7.ico";
+    win.document.head.appendChild(link);
+
+    const iframe = win.document.createElement("iframe");
+    iframe.style.position = "fixed";
+    iframe.style.inset = "0";
+    iframe.style.width = "100%";
+    iframe.style.height = "100%";
+    iframe.style.border = "none";
+    iframe.src = window.location.href;
+    win.document.body.style.margin = "0";
+    win.document.body.style.overflow = "hidden";
+    win.document.body.appendChild(iframe);
+
+    window.location.replace("https://classroom.google.com");
+  } catch (e) {
+    console.warn("About:blank launch blocked:", e);
+  }
+});
+
+// Fullscreen Toggle
+document.getElementById("btn-fs").addEventListener("click", async () => {
+  const target = document.getElementById("game") || document.documentElement;
+  try {
+    if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+      const req = target.requestFullscreen || target.webkitRequestFullscreen;
+      if (req) await req.call(target);
+    } else {
+      const exit = document.exitFullscreen || document.webkitExitFullscreen;
+      if (exit) await exit.call(document);
+    }
+  } catch (err) {
+    console.warn("Fullscreen toggle error:", err);
+  }
+  const canvas = document.getElementById("canvas");
+  if (canvas) canvas.focus();
+});
+</script>
+
+<!-- Load love.js / player runtime from CDN with game.love targeted -->
+<script
+  crossorigin="anonymous"
+  src="https://cdn.jsdelivr.net/gh/nawsif/absw2@main/player.js?g=game.love&amp;n=1&amp;ui=fullscreen-1"
+></script>
+</body>
+</html>
