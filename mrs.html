@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en-us">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>MyRustySubmarine</title>
+
+    <base href="https://cdn.jsdelivr.net/gh/AlexBoops/myrustysubrip@main/" />
+    <link rel="shortcut icon" href="https://cdn.jsdelivr.net/gh/AlexBoops/myrustysubrip@main/TemplateData/favicon.ico">
+
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html, body {
+        background: #000;
+        color: #cccccc;
+        width: 100vw;
+        height: 100vh;
+        overflow: hidden;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: Arial, Helvetica, sans-serif;
+      }
+      .webgl-content {
+        position: relative;
+        width: 100vw;
+        height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      #unityContainer {
+        width: 100% !important;
+        height: 100% !important;
+      }
+      canvas {
+        width: 100% !important;
+        height: 100% !important;
+        display: block;
+      }
+      .rb-controls {
+        position: fixed;
+        top: 12px;
+        right: 12px;
+        display: flex;
+        gap: 8px;
+        z-index: 999999;
+      }
+      .rb-button {
+        background: rgba(0, 0, 0, 0.65);
+        color: #ddd;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 6px;
+        box-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+        padding: 6px 12px;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+        cursor: pointer;
+        user-select: none;
+        backdrop-filter: blur(4px);
+        transition: background 0.2s, color 0.2s;
+      }
+      .rb-button:hover {
+        background: rgba(255, 255, 255, 0.15);
+        color: #fff;
+      }
+      .rb-button:active {
+        transform: translateY(1px);
+      }
+      #custom-loader {
+        position: fixed;
+        bottom: 24px;
+        left: 50%;
+        transform: translateX(-50%);
+        color: #888;
+        font-size: 13px;
+        letter-spacing: 1px;
+        pointer-events: none;
+        z-index: 999998;
+      }
+    </style>
+
+    <script>
+      const JSDELIVR_BASE = "https://cdn.jsdelivr.net/gh/AlexBoops/myrustysubrip@main/";
+      const GITHACK_BASE = "https://raw.githack.com/AlexBoops/myrustysubrip/main/";
+
+      function fixUrl(url) {
+        if (!url || typeof url !== "string") return url;
+        if (url.startsWith("data:") || url.startsWith("blob:")) {
+          return url;
+        }
+
+        // Strip any domain prefixes if UnityLoader formed an absolute URL pointing to root
+        let clean = url
+          .replace("https://cdn.jsdelivr.net/gh/AlexBoops/myrustysubrip@main/", "")
+          .replace("https://raw.githack.com/AlexBoops/myrustysubrip/main/", "")
+          .replace(/^\/+/, "");
+
+        // If the path targets engine assets directly without the Build/ directory, prefix it
+        if (!clean.startsWith("Build/") && !clean.startsWith("TemplateData/") && (
+            clean.includes("MyRustySubmarineWebGL") || 
+            clean.endsWith(".unityweb") || 
+            clean.endsWith(".wasm") || 
+            clean.endsWith(".json")
+        )) {
+          clean = "Build/" + clean;
+        }
+
+        // Route large binary packages through GitHack to bypass jsDelivr 50MB and MIME limits
+        if (clean.endsWith(".data") || clean.endsWith(".wasm") || clean.includes(".data.unityweb") || clean.includes(".wasm.code.unityweb")) {
+          return GITHACK_BASE + clean;
+        }
+        return JSDELIVR_BASE + clean;
+      }
+
+      // Intercept XHR for CDN routing
+      const origOpen = XMLHttpRequest.prototype.open;
+      XMLHttpRequest.prototype.open = function(method, url, ...rest) {
+        return origOpen.call(this, method, fixUrl(url), ...rest);
+      };
+
+      // Intercept Fetch
+      const origFetch = window.fetch;
+      window.fetch = function(input, init) {
+        let url = typeof input === "string" ? input : (input && input.url ? input.url : "");
+        return origFetch(typeof input === "string" ? fixUrl(url) : new Request(fixUrl(url), input), init);
+      };
+
+      // Unlock AudioContext on interaction
+      function unlockAudio() {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (AC) {
+          const dummy = new AC();
+          if (dummy.state === "suspended") dummy.resume();
+        }
+      }
+      window.addEventListener("click", unlockAudio, { once: true });
+      window.addEventListener("keydown", unlockAudio, { once: true });
+      window.addEventListener("touchstart", unlockAudio, { once: true });
+
+      var unityInstance = null;
+
+      function customProgress(instance, progress) {
+        const loader = document.getElementById("custom-loader");
+        if (!loader) return;
+        if (progress < 1) {
+          loader.textContent = "LOADING: " + Math.round(progress * 100) + "%";
+        } else {
+          loader.style.display = "none";
+        }
+      }
+
+      window.initUnity = function() {
+        if (window.__unityStarted) return;
+        if (typeof UnityLoader === "undefined" || !UnityLoader.instantiate) {
+          return;
+        }
+        window.__unityStarted = true;
+
+        const jsonUrl = fixUrl("Build/MyRustySubmarineWebGL.json");
+
+        fetch(jsonUrl)
+          .then(res => res.json())
+          .then(config => {
+            // Explicitly force full Build/ paths on all asset properties
+            if (config.dataUrl) config.dataUrl = fixUrl(config.dataUrl);
+            if (config.wasmCodeUrl) config.wasmCodeUrl = fixUrl(config.wasmCodeUrl);
+            if (config.wasmFrameworkUrl) config.wasmFrameworkUrl = fixUrl(config.wasmFrameworkUrl);
+            if (config.asmCodeUrl) config.asmCodeUrl = fixUrl(config.asmCodeUrl);
+            if (config.asmFrameworkUrl) config.asmFrameworkUrl = fixUrl(config.asmFrameworkUrl);
+            if (config.asmMemoryUrl) config.asmMemoryUrl = fixUrl(config.asmMemoryUrl);
+
+            const blob = new Blob([JSON.stringify(config)], { type: "application/json" });
+            const blobUrl = URL.createObjectURL(blob);
+
+            unityInstance = UnityLoader.instantiate("unityContainer", blobUrl, {
+              onProgress: customProgress
+            });
+          })
+          .catch(() => {
+            unityInstance = UnityLoader.instantiate("unityContainer", jsonUrl, {
+              onProgress: customProgress
+            });
+          });
+      };
+    </script>
+  </head>
+
+  <body>
+    <div class="rb-controls">
+      <button class="rb-button" id="btn-ab" title="Open in About:Blank">🌐 About:Blank</button>
+      <button class="rb-button" id="btn-fs" title="Toggle Fullscreen">⛶ Fullscreen</button>
+    </div>
+
+    <div class="webgl-content">
+      <div id="unityContainer"></div>
+    </div>
+
+    <div id="custom-loader">INITIALIZING ENGINE...</div>
+
+    <script>
+      // About:Blank Cloaker
+      const abBtn = document.getElementById("btn-ab");
+      if (window.location.href === "about:blank" || window.origin === "null") {
+        abBtn.style.display = "none";
+      }
+      abBtn.addEventListener("click", function() {
+        try {
+          const win = window.open("about:blank", "_blank");
+          if (!win || win.closed) {
+            alert("Pop-up blocked! Allow pop-ups to open about:blank.");
+            return;
+          }
+          win.document.title = "Google Docs";
+          const link = win.document.createElement("link");
+          link.rel = "icon";
+          link.href = "https://ssl.gstatic.com/docs/documents/images/kix-favicon7.ico";
+          win.document.head.appendChild(link);
+
+          const iframe = win.document.createElement("iframe");
+          iframe.style.position = "fixed";
+          iframe.style.inset = "0";
+          iframe.style.width = "100%";
+          iframe.style.height = "100%";
+          iframe.style.border = "none";
+          iframe.src = window.location.href;
+          win.document.body.style.margin = "0";
+          win.document.body.style.overflow = "hidden";
+          win.document.body.appendChild(iframe);
+
+          window.location.replace("https://classroom.google.com");
+        } catch (e) {
+          console.warn("About:blank launch blocked:", e);
+        }
+      });
+
+      // Fullscreen Toggle
+      document.getElementById("btn-fs").addEventListener("click", function() {
+        if (unityInstance && typeof unityInstance.SetFullscreen === "function") {
+          unityInstance.SetFullscreen(1);
+        } else {
+          const target = document.getElementById("unityContainer") || document.documentElement;
+          const req = target.requestFullscreen || target.webkitRequestFullscreen;
+          if (req) req.call(target).catch(() => {});
+        }
+      });
+    </script>
+
+    <!-- Load UnityLoader -->
+    <script
+      crossorigin="anonymous"
+      src="https://cdn.jsdelivr.net/gh/AlexBoops/myrustysubrip@main/Build/UnityLoader.js"
+      onload="initUnity();"
+    ></script>
+
+    <script>
+      if (typeof UnityLoader !== "undefined" && !window.__unityStarted) {
+        initUnity();
+      } else {
+        window.addEventListener("load", function() {
+          if (!window.__unityStarted) initUnity();
+        });
+      }
+    </script>
+  </body>
+</html>
