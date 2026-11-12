@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en-us">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <title>Google Docs</title>
+  <link rel="icon" href="https://ssl.gstatic.com/docs/documents/images/kix-favicon7.ico">
+  <link href="https://fonts.googleapis.com/css2?family=Audiowide&display=swap" rel="stylesheet">
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      width: 100vw;
+      height: 100vh;
+      background: #000;
+      overflow: hidden;
+      color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
+    }
+
+    #unity-container {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      background: #000;
+    }
+
+    #unity-canvas {
+      width: 100% !important;
+      height: 100% !important;
+      display: block;
+      background: #000;
+      outline: none;
+    }
+
+    #unity-loading-bar {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0, 0, 0, 0.9);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      z-index: 100;
+      padding: 20px;
+      text-align: center;
+    }
+
+    #loading-title {
+      font-family: 'Audiowide', sans-serif;
+      font-size: 26px;
+      letter-spacing: 2px;
+      color: #ff9900;
+      text-shadow: 0 0 12px rgba(255, 153, 0, 0.5);
+      margin-bottom: 14px;
+    }
+
+    #unity-progress-bar-empty {
+      width: 320px;
+      max-width: 85vw;
+      height: 12px;
+      background: #1a1a1a;
+      border: 2px solid #ff9900;
+      border-radius: 6px;
+      overflow: hidden;
+      box-shadow: 0 0 10px rgba(255, 153, 0, 0.3);
+      margin-bottom: 10px;
+    }
+
+    #unity-progress-bar-full {
+      width: 0%;
+      height: 100%;
+      background-image: linear-gradient(270deg, red, orange, yellow);
+      background-size: 300% 300%;
+      animation: fireInside 3s linear infinite;
+      transition: width 0.15s ease;
+    }
+
+    #loading-status {
+      color: #c7c1d2;
+      font-family: monospace;
+      font-size: 13px;
+    }
+
+    #unity-warning {
+      position: fixed;
+      top: 54px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 200;
+      color: #000;
+      font-weight: bold;
+      border-radius: 6px;
+      overflow: hidden;
+    }
+
+    #top-bar {
+      position: fixed;
+      top: 12px;
+      left: 12px;
+      display: flex;
+      gap: 8px;
+      z-index: 999999;
+    }
+
+    .hud-btn {
+      background-color: #111;
+      color: #fff;
+      border: 2px solid #ff9900;
+      font-size: 11px;
+      font-family: 'Audiowide', sans-serif;
+      padding: 7px 14px;
+      cursor: pointer;
+      border-radius: 6px;
+      letter-spacing: 1px;
+      box-shadow: 0 0 8px rgba(255, 153, 0, 0.4);
+      transition: all 0.3s ease;
+      user-select: none;
+    }
+
+    .hud-btn:hover, .fireInside {
+      background-image: linear-gradient(270deg, red, orange, yellow) !important;
+      background-size: 300% 300% !important;
+      animation: fireInside 3s linear infinite !important;
+      color: #fff !important;
+      text-shadow: 0 0 8px rgba(255, 255, 255, 0.7);
+      box-shadow: inset 0 0 10px rgba(255, 165, 0, 0.4), 0 0 14px #ff9900 !important;
+      border-color: #ff9900 !important;
+    }
+
+    @keyframes fireInside {
+      0%   { background-position: 0% 50%; }
+      50%  { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+  </style>
+</head>
+<body>
+  <div id="top-bar">
+    <button id="btn-ab" class="hud-btn" onclick="openAboutBlank(this)" onmouseover="this.classList.add('fireInside')" onmouseout="this.classList.remove('fireInside')">about:blank</button>
+    <button id="btn-fs" class="hud-btn" onclick="toggleFullscreen()" onmouseover="this.classList.add('fireInside')" onmouseout="this.classList.remove('fireInside')">Fullscreen</button>
+  </div>
+
+  <div id="unity-container">
+    <canvas id="unity-canvas" tabindex="-1"></canvas>
+    <div id="unity-loading-bar">
+      <div id="loading-title">CASUALTIES: UNKNOWN</div>
+      <div id="unity-progress-bar-empty">
+        <div id="unity-progress-bar-full"></div>
+      </div>
+      <div id="loading-status">Initializing...</div>
+    </div>
+    <div id="unity-warning"></div>
+  </div>
+
+  <script>
+    const CDN_BASE = "https://cdn.jsdelivr.net/gh/AlexBoops/casualites-unknown@main/";
+    const DATA_PART_COUNT = 12; // part0 through part11
+
+    // 1. Web Audio Auto-Unlock
+    (function () {
+      var audioCtxs = [];
+      var OrigAudioContext = window.AudioContext || window.webkitAudioContext;
+      if (OrigAudioContext) {
+        var PatchedAudioContext = function (opts) {
+          var ctx = new OrigAudioContext(opts);
+          audioCtxs.push(ctx);
+          return ctx;
+        };
+        PatchedAudioContext.prototype = OrigAudioContext.prototype;
+        window.AudioContext = PatchedAudioContext;
+        if (window.webkitAudioContext) window.webkitAudioContext = PatchedAudioContext;
+
+        function resumeAllAudio() {
+          audioCtxs.forEach(function (c) {
+            if (c && c.state === "suspended") c.resume().catch(function () {});
+          });
+        }
+        window.addEventListener("pointerdown", resumeAllAudio, { passive: true });
+        window.addEventListener("keydown", resumeAllAudio, { passive: true });
+      }
+    })();
+
+    // 2. Pointer Lock Guard
+    (function () {
+      var origPointerLock = Element.prototype.requestPointerLock || function () {};
+      Element.prototype.requestPointerLock = function () {
+        try {
+          var res = origPointerLock.apply(this, arguments);
+          if (res && typeof res.catch === "function") res.catch(function () {});
+          return res;
+        } catch (e) {}
+      };
+    })();
+
+    // 3. about:blank Cloaker & Fullscreen
+    var ORIGINAL_TEXT = "about:blank";
+    var POPUP_TEXT = "Allow Popups!";
+    function setTemp(text, ms) {
+      var btn = document.getElementById("btn-ab");
+      if (!btn) return;
+      btn.innerText = text;
+      btn.classList.add("fireInside");
+      setTimeout(function () {
+        btn.innerText = ORIGINAL_TEXT;
+        btn.classList.remove("fireInside");
+      }, ms || 3500);
+    }
+
+    function openAboutBlank() {
+      try {
+        var win = window.open("about:blank", "_blank");
+        if (!win || win.closed) {
+          setTemp(POPUP_TEXT, 4500);
+          return;
+        }
+        var docClone = document.documentElement.cloneNode(true);
+        var topBar = docClone.querySelector("#top-bar");
+        if (topBar) topBar.remove();
+
+        var doc = win.document;
+        doc.open();
+        doc.write("<!doctype html>\n" + docClone.outerHTML);
+        doc.close();
+
+        var checkReady = setInterval(function () {
+          try {
+            if (win.document && win.document.head) {
+              win.document.title = "Google Docs";
+              var link = win.document.querySelector("link[rel*='icon']");
+              if (!link) {
+                link = win.document.createElement("link");
+                link.rel = "icon";
+                win.document.head.appendChild(link);
+              }
+              link.href = "https://ssl.gstatic.com/docs/documents/images/kix-favicon7.ico";
+              clearInterval(checkReady);
+            }
+          } catch (err) {
+            clearInterval(checkReady);
+          }
+        }, 50);
+      } catch (e) {
+        setTemp(POPUP_TEXT, 4500);
+      }
+    }
+
+    var activeUnityInstance = null;
+    function toggleFullscreen() {
+      if (activeUnityInstance) {
+        activeUnityInstance.SetFullscreen(1);
+        return;
+      }
+      var canvas = document.querySelector("#unity-canvas") || document.documentElement;
+      if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+        (canvas.requestFullscreen || canvas.webkitRequestFullscreen).call(canvas);
+      } else {
+        (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+      }
+      if (canvas) canvas.focus();
+    }
+
+    // 4. Unity UI Helpers
+    var canvas = document.querySelector("#unity-canvas");
+    var loadingBar = document.querySelector("#unity-loading-bar");
+    var progressBarFull = document.querySelector("#unity-progress-bar-full");
+    var loadingStatus = document.querySelector("#loading-status");
+    var warningBanner = document.querySelector("#unity-warning");
+
+    function unityShowBanner(msg, type) {
+      function updateBannerVisibility() {
+        warningBanner.style.display = warningBanner.children.length ? "block" : "none";
+      }
+      var div = document.createElement("div");
+      div.innerHTML = msg;
+      warningBanner.appendChild(div);
+      if (type == "error") div.style = "background: red; color: #fff; padding: 10px;";
+      else {
+        if (type == "warning") div.style = "background: yellow; color: #000; padding: 10px;";
+        setTimeout(function () {
+          if (div.parentNode === warningBanner) warningBanner.removeChild(div);
+          updateBannerVisibility();
+        }, 5000);
+      }
+      updateBannerVisibility();
+    }
+
+    // 5. Intercept relative StreamingAssets / TemplateData requests to resolve on jsDelivr
+    (function () {
+      const origFetch = window.fetch;
+      window.fetch = function (input, init) {
+        if (typeof input === "string" && !input.startsWith("http:") && !input.startsWith("https:") && !input.startsWith("blob:") && !input.startsWith("data:")) {
+          const clean = input.replace(/^\.?\//, "");
+          const encoded = clean.split("/").map(encodeURIComponent).join("/");
+          input = CDN_BASE + encoded;
+        }
+        return origFetch.call(this, input, init);
+      };
+
+      const origOpen = XMLHttpRequest.prototype.open;
+      XMLHttpRequest.prototype.open = function (method, url) {
+        if (typeof url === "string" && !url.startsWith("http:") && !url.startsWith("https:") && !url.startsWith("blob:") && !url.startsWith("data:")) {
+          const clean = url.replace(/^\.?\//, "");
+          const encoded = clean.split("/").map(encodeURIComponent).join("/");
+          arguments[1] = CDN_BASE + encoded;
+        }
+        return origOpen.apply(this, arguments);
+      };
+    })();
+
+    // 6. Pure-JS Brotli Decoder (`BrotliDecompressBuffer` from esm.sh/brotli@1.3.3/dec/decode.js)
+    let cachedDecoder = null;
+    async function getBrotliDecoder() {
+      if (cachedDecoder) return cachedDecoder;
+      const mod = await import("https://esm.sh/brotli@1.3.3/dec/decode.js");
+      const decodeFn =
+        mod.BrotliDecompressBuffer ||
+        (mod.default && mod.default.BrotliDecompressBuffer) ||
+        mod.BrotliDecompress ||
+        (mod.default && mod.default.BrotliDecompress);
+      if (typeof decodeFn !== "function") {
+        throw new Error("Could not initialize Brotli decoder function.");
+      }
+      cachedDecoder = decodeFn;
+      return cachedDecoder;
+    }
+
+    async function fetchDecompressedBlobUrl(relativePath, mimeType, label) {
+      loadingStatus.textContent = "Downloading " + label + "...";
+      const encoded = relativePath.split("/").map(encodeURIComponent).join("/");
+      const res = await fetch(CDN_BASE + encoded);
+      if (!res.ok) throw new Error("Failed to fetch " + relativePath + " (" + res.status + ")");
+      const compressed = new Uint8Array(await res.arrayBuffer());
+
+      const decode = await getBrotliDecoder();
+      loadingStatus.textContent = "Decompressing " + label + "...";
+      await new Promise((r) => setTimeout(r, 10));
+      const raw = decode(compressed);
+      return URL.createObjectURL(new Blob([raw], { type: mimeType }));
+    }
+
+    async function fetchSplitDataBlobUrl() {
+      const baseEncoded = "Build/" + encodeURIComponent("scav webgl.data.br");
+      let completed = 0;
+
+      const partPromises = [];
+      for (let i = 0; i < DATA_PART_COUNT; i++) {
+        const partUrl = CDN_BASE + baseEncoded + ".part" + i;
+        partPromises.push(
+          fetch(partUrl).then(async (res) => {
+            if (!res.ok) throw new Error("Chunk part" + i + " failed (" + res.status + ")");
+            const buf = await res.arrayBuffer();
+            completed++;
+            const pct = Math.round((completed / DATA_PART_COUNT) * 60);
+            progressBarFull.style.width = pct + "%";
+            loadingStatus.textContent = "Downloading game data (" + completed + "/" + DATA_PART_COUNT + " parts)...";
+            return new Uint8Array(buf);
+          })
+        );
+      }
+
+      const chunks = await Promise.all(partPromises);
+      const totalLen = chunks.reduce((acc, c) => acc + c.byteLength, 0);
+      const merged = new Uint8Array(totalLen);
+      let offset = 0;
+      for (const chunk of chunks) {
+        merged.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+
+      const decode = await getBrotliDecoder();
+      loadingStatus.textContent = "Decompressing game data (" + Math.round(totalLen / 1048576) + " MB)...";
+      progressBarFull.style.width = "70%";
+      await new Promise((r) => setTimeout(r, 25));
+
+      const rawData = decode(merged);
+      return URL.createObjectURL(new Blob([rawData], { type: "application/octet-stream" }));
+    }
+
+    // 7. Boot Unity WebGL Instance
+    async function bootUnity() {
+      try {
+        loadingStatus.textContent = "Initializing Brotli decoder...";
+        await getBrotliDecoder();
+
+        const loaderUrl = CDN_BASE + "Build/" + encodeURIComponent("scav webgl.loader.js");
+
+        const [frameworkUrl, codeUrl, dataUrl] = await Promise.all([
+          fetchDecompressedBlobUrl("Build/scav webgl.framework.js.br", "application/javascript", "framework"),
+          fetchDecompressedBlobUrl("Build/scav webgl.wasm.br", "application/wasm", "WebAssembly"),
+          fetchSplitDataBlobUrl()
+        ]);
+
+        let symbolsUrl = undefined;
+        try {
+          symbolsUrl = await fetchDecompressedBlobUrl("Build/scav webgl.symbols.json.br", "application/json", "symbols");
+        } catch (e) {}
+
+        const config = {
+          dataUrl: dataUrl,
+          frameworkUrl: frameworkUrl,
+          codeUrl: codeUrl,
+          streamingAssetsUrl: CDN_BASE + "StreamingAssets",
+          companyName: "Orsoniks",
+          productName: "CasualtiesUnknown",
+          productVersion: "1.0",
+          showBanner: unityShowBanner
+        };
+        if (symbolsUrl) config.symbolsUrl = symbolsUrl;
+
+        loadingStatus.textContent = "Initializing Unity runtime...";
+        progressBarFull.style.width = "85%";
+
+        const script = document.createElement("script");
+        script.src = loaderUrl;
+        script.onload = () => {
+          createUnityInstance(canvas, config, (progress) => {
+            const totalPct = 85 + Math.round(progress * 15);
+            progressBarFull.style.width = totalPct + "%";
+            loadingStatus.textContent = "Starting engine... " + Math.round(100 * progress) + "%";
+          }).then((unityInstance) => {
+            activeUnityInstance = unityInstance;
+            loadingBar.style.display = "none";
+          }).catch((message) => {
+            loadingStatus.textContent = "Error: " + message;
+            console.error(message);
+          });
+        };
+        script.onerror = () => {
+          loadingStatus.textContent = "Failed to load Unity loader script.";
+        };
+        document.body.appendChild(script);
+      } catch (err) {
+        loadingStatus.textContent = "Boot failed: " + err.message;
+        console.error(err);
+      }
+    }
+
+    bootUnity();
+  </script>
+</body>
+</html>
